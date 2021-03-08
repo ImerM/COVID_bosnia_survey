@@ -1,0 +1,123 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(corrplot)
+```
+
+Zelim:
+1) Ucitati odgovor
+2) Pitanja sa ogranicenim odgovorima pretvoriti u faktore
+3) Multiple choice pitanja podijeliti u vise kolona pa one hot encodirati
+
+1) ucitavanje
+
+```{r}
+survey <- read_csv("survey_covid_abbr.csv")
+```
+
+2) Pretvaranje u faktore
+```{r}
+survey <- survey %>% mutate(Spol = as_factor(Spol), Obrazovanje = as_factor(Obrazovanje), Profesija = as_factor(Profesija), Godine = as_factor(Godine), Zarada = as_factor(Zarada), Vakcinisati_se = as_factor(Vakcinisati_se))
+```
+
+3) Pretvaranje multiple choice kolona u vise kolona sa 1 ili 0 upisanim, ovisno od odgovora (da ili ne), obrisati kolone sa pitanjima, spasiti ko tabelu
+
+```{r}
+survey$motiv_zastita_zdravlja <- grepl("Očuvanje mog zdravlja i zaštita od virusa", survey$Motivi_za_vakc)
+survey$motiv_putovanje <- grepl("Mogućnost putovanja i izbjegavanje “travel bana“", survey$Motivi_za_vakc)
+survey$motiv_kolektivni_imunitet <- grepl("Sticanje kolektivnog imuniteta i sprečavanje širenja virusa", survey$Motivi_za_vakc)
+survey$motiv_zahtjev_poslodavca <- grepl("Zahtjev poslodavca i očuvanje radnog mjesta", survey$Motivi_za_vakc)
+
+survey$motiv_odbijanje_nije_opasan <- grepl("COVID-19 bolest nije opasna po moje zdravlje", survey$Razlozi_odbijanja)
+survey$motiv_odbijanje_ne_postoji <- grepl("SARS-CoV-2 ne postoji - to je jedna velika zavjera", survey$Razlozi_odbijanja)
+survey$motiv_odbijanje_vac_stetne <- grepl("Vakcine su veoma štetne za naše zdravlje", survey$Razlozi_odbijanja)
+survey$motiv_odbijanje_vac_regulativa_prebrzo <- grepl("Vakcina nije prošla ustaljene regulative i prebrzo se našla na tržištu", survey$Razlozi_odbijanja)
+survey$motiv_odbijanje_nepovjerenje_struka_farmacija <- grepl("Nemam povjerenje u struku i farmaceutske kompanije", survey$Razlozi_odbijanja)
+survey$motiv_odbijanje_najosjetljiviji_prvo <- grepl("Najosetljivija kategorija stanovništva treba primiti vakcinu", survey$Razlozi_odbijanja)
+survey$motiv_odbijanje_protiv_eticki_vjerski <- grepl("Sastav vakcine protivi se mojim etičkim i vjerskim principima", survey$Razlozi_odbijanja)
+
+survey$izvor_obrazovne_emisije <- grepl("Obrazovne i edukativne emisije", survey$Izvori_info)
+survey$izvor_naucne_knjige_radovi <- grepl("Naučne knjige i naučne radove", survey$Izvori_info)
+survey$izvor_preporuke_por_ljekara <- grepl("Preporuke porodičnog ljekara", survey$Izvori_info)
+survey$izvor_drustvene_mreze <- grepl("Društvene mreže", survey$Izvori_info)
+survey$izvor_mediji <- grepl("Medije i informativne portale", survey$Izvori_info)
+
+survey$izbor_pfizer <- grepl("Pfizer–BioNTech", survey$Izbor_proizvodjac)
+survey$izbor_astrozeneca <- grepl("Oxford-AstraZeneca", survey$Izbor_proizvodjac)
+survey$izbor_moderna <- grepl("Moderna", survey$Izbor_proizvodjac)
+survey$izbor_sputnik <- grepl("Sputnik V", survey$Izbor_proizvodjac)
+survey$izbor_sinovac <- grepl("Sinovac", survey$Izbor_proizvodjac)
+
+survey$izbor_razlog_studije <- grepl("Kliničkih studija i efikasnosti koje je vakcina pokazala", survey$Izbor_proizvodjac_razlog)
+survey$izbor_razlog_vanjske_politike <- grepl("Vanjske politike koju država proizvođača ima prema drugim narodima i državama", survey$Izbor_proizvodjac_razlog)
+survey$izbor_savjet_ljekara <- grepl("Savjeta ljekara ili medicinskog uposlenika", survey$Izbor_proizvodjac_razlog)
+survey$izbor_jedina_dostupna <- grepl("Jedina dostupna vakcina na tržištu", survey$Izbor_proizvodjac_razlog)
+survey$izbor_vlada_odabrala_vjerujem <- grepl("Vlada moje države je odabrala tog proizvođača i imam povjerenje u nju", survey$Izbor_proizvodjac_razlog)
+
+survey <- survey %>% mutate(Timestamp = NULL, Motivi_za_vakc = NULL, Razlozi_odbijanja = NULL, Izvori_info = NULL, Izbor_proizvodjac = NULL, Izbor_proizvodjac_razlog = NULL)
+survey$Motivi_za_vakc <- NA
+survey$Razlozi_odbijanja <- NA
+survey$Izvori_info <- NA
+survey$Izbor_proizvodjac <- NA
+survey$Izbor_proizvodjac_razlog <- NA
+ 
+survey %>% write_csv("survey_encoded.csv")
+```
+
+
+Univariate logistic regression
+```{r}
+
+survey %>% filter(Vakcinisati_se %in% c("Da", "Ne"))  -> survey_da_ne # interested only in yes or no answers
+survey_da_ne$vacc_reg <- factor(ifelse(survey_da_ne$Vakcinisati_se == "Da", 1, 0))
+
+survey_da_ne$Obrazovanje <- survey_da_ne$Obrazovanje %>% factor(levels = c("Osnovna škola", "Srednjoškolsko obrazovanje", "Dodiplomski studij", "Postdiplomski studij (magistarski i doktorski studij)"))
+
+survey_da_ne$Zarada <- survey_da_ne$Zarada %>% factor(levels = c("500 KM ili manje", "Od 500 do 900 KM", "900 KM i više"))
+
+```
+
+Fitting
+```{r}
+
+# Vakcinacija (samo da-ne odgovori vs spol)
+fit2 <- glm(data = survey_da_ne, formula = vacc_reg ~ Spol, family=binomial(link="logit"))
+summary(fit2)
+exp(cbind(coef(fit2), confint(fit2)))
+
+# Vakcinacija (samo da-ne odgovori vs obrazovanje)
+fit3 <- glm(data = survey_da_ne, formula = vacc_reg ~ Obrazovanje, family=binomial(link="logit"))
+summary(fit3)
+exp(cbind(coef(fit3), confint(fit3)))
+
+# Vakcinacija (samo da-ne odgovori vs profesija)
+fit4 <- glm(data = survey_da_ne, formula = vacc_reg ~ Profesija, family=binomial(link="logit"))
+summary(fit4)
+exp(cbind(coef(fit4), confint(fit4)))
+
+# Vakcinacija (samo da-ne odgovori vs godine)
+fit5 <- glm(data = survey_da_ne, formula = vacc_reg ~ Godine, family=binomial(link="logit"))
+summary(fit5)
+exp(cbind(coef(fit5), confint(fit5)))
+
+# Vakcinacija (samo da-ne odgovori vs zarada)
+fit6 <- glm(data = survey_da_ne, formula = vacc_reg ~ Zarada, family=binomial(link="logit"))
+summary(fit6)
+exp(cbind(coef(fit6), confint(fit6)))
+
+```
+
+Correlation
+```{r}
+# Convert all to numeric
+## Samo ovi koji bi da se vakcinisu
+obrazovanje_df <- filter(survey_da_ne, Vakcinisati_se == "Da") %>% select(Obrazovanje, izbor_sinovac, izbor_sputnik, izbor_moderna, izbor_pfizer, izbor_astrozeneca) %>% sapply(as.numeric)
+obrazovanje_cor <- cor(obrazovanje_df)
+obrazovanje_cor %>% corrplot()
+obrazovanje_cor
+
+```
